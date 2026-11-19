@@ -21,8 +21,7 @@ const ROOT = path.resolve(__dirname, ".."); // only used when running from sourc
 const PROJECT = process.env.EMBER_PROJECT || path.join(os.homedir(), "Documents", "ember");
 const TYPES = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".json": "application/json", ".txt": "text/plain" };
 
-fs.mkdirSync(path.join(PROJECT, "scenes"), { recursive: true });
-fs.mkdirSync(path.join(PROJECT, "sprites"), { recursive: true });
+fs.mkdirSync(PROJECT, { recursive: true });
 
 /** Static file from the packaged assets, or from disk when run from source. */
 function readStatic(rel) {
@@ -38,7 +37,7 @@ function readStatic(rel) {
 function projectPath(rel) {
   if (typeof rel !== "string" || !rel || rel.includes("\0")) return null;
   const p = path.normalize(path.join(PROJECT, rel));
-  return p.startsWith(PROJECT + path.sep) ? p : null;
+  return p === PROJECT || p.startsWith(PROJECT + path.sep) ? p : null;
 }
 
 function body(req, limit = 64 * 1024 * 1024) {
@@ -67,7 +66,8 @@ const server = http.createServer(async (req, res) => {
       if (!target) { res.writeHead(400).end("bad path"); return; }
       if (url.pathname === "/api/list" && req.method === "GET") {
         let names = [];
-        try { names = fs.readdirSync(target).filter((n) => !n.startsWith(".")); } catch { names = []; }
+        // folders get a trailing slash so the hub can tell projects from files
+        try { names = fs.readdirSync(target, { withFileTypes: true }).filter((d) => !d.name.startsWith(".")).map((d) => d.isDirectory() ? d.name + "/" : d.name); } catch { names = []; }
         res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify(names));
       } else if (url.pathname === "/api/file" && req.method === "GET") {
         let data;

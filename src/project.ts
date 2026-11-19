@@ -32,6 +32,7 @@ class DesktopStore implements ProjectStore {
   private req(method: string, api: string, path: string, body?: string) {
     return fetch(`/api/${api}?path=${encodeURIComponent(path)}`, { method, body, headers: { "x-ember-token": this.token } });
   }
+  /** Names in a folder; sub-folders end with "/". */
   async list(dir: string) { const r = await this.req("GET", "list", dir); return r.ok ? (await r.json()) as string[] : []; }
   async read(path: string) { const r = await this.req("GET", "file", path); return r.ok ? r.text() : null; }
   async write(path: string, text: string) { const r = await this.req("PUT", "file", path, text); if (!r.ok) throw new Error(`save failed (${r.status})`); }
@@ -83,6 +84,18 @@ class FolderStore implements ProjectStore {
   }
 }
 
+/** A view of a store limited to one sub-folder. */
+export function scoped(base: ProjectStore, dir: string): ProjectStore {
+  const p = (path: string) => `${dir}/${path}`;
+  return {
+    label: `${base.label}${base.label.includes("\\") ? "\\" : "/"}${dir}`,
+    list: (d) => base.list(p(d)),
+    read: (f) => base.read(p(f)),
+    write: (f, t) => base.write(p(f), t),
+    remove: (f) => base.remove(p(f)),
+  };
+}
+
 let current: ProjectStore | null = null;
 const listeners: ((p: ProjectStore | null) => void)[] = [];
 
@@ -113,6 +126,30 @@ export const Project = {
   },
 
   set(p: ProjectStore | null): void { current = p; for (const l of listeners) l(p); },
+
+  /** Desktop app: the store for one project, i.e. paths under <root>/<name>/. */
+  async openDesktopProject(name: string): Promise<boolean> {
+    const t = desktopToken();
+    if (!t) return false;
+    try {
+      const r = await fetch("/api/info", { headers: { "x-ember-token": t } });
+      if (!r.ok) return false;
+      const info = await r.json() as { project: string };
+      this.set(scoped(new DesktopStore(t, info.project), name));
+      return true;
+    } catch { return false; }
+  },
+
+  /** Desktop app: the root store that holds every project folder. */
+  async desktopRoot(): Promise<ProjectStore | null> {
+    const t = desktopToken();
+    if (!t) return null;
+    try {
+      const r = await fetch("/api/info", { headers: { "x-ember-token": t } });
+      if (!r.ok) return null;
+      return new DesktopStore(t, ((await r.json()) as { project: string }).project);
+    } catch { return null; }
+  },
 
   get folderSupported(): boolean { return "showDirectoryPicker" in window; },
 };

@@ -17,6 +17,7 @@ import { ScriptRuntime } from "../src/script.ts";
 import { initSpriteEditor } from "./sprite-editor.ts";
 import { setupScriptsTab } from "./scripts-tab.ts";
 import { hydrateIcons, icon } from "./icons.ts";
+import { templateScene } from "./templates.ts";
 import { Project } from "../src/project.ts";
 import { Library } from "../src/assets.ts";
 
@@ -29,64 +30,11 @@ eng.autoPhysics = false;
 const R = eng.renderer;
 
 // ---- state -----------------------------------------------------------------
-const STORE = "ember.editor.scene.v2";
-const DEFAULT: Scene = {
-  version: 1, name: "untitled", fog: 0.0065,
-  scripts: {
-    player: `// Attached to "player". Runs every fixed step (60 per second).
-function start(self, game) {
-  game.state.score = 0;
-  game.follow(self, 9, 4);          // camera follows this object
-}
-
-function update(self, game, dt) {
-  const m = game.input.axes();      // WASD / arrows / gamepad
-  const speed = game.input.held("ShiftLeft") ? 9 : 6;
-  // move relative to where the camera looks
-  const cam = game.camera, fx = cam.target[0] - cam.pos[0], fz = cam.target[2] - cam.pos[2];
-  const l = Math.hypot(fx, fz) || 1, f = [fx / l, fz / l], r = [-f[1], f[0]];
-  const v = self.velocity;
-  self.velocity = [(f[0] * m.y + r[0] * m.x) * speed, v[1], (f[1] * m.y + r[1] * m.x) * speed];
-  if (game.input.pressed("Space") && self.grounded) {
-    self.velocity = [self.velocity[0], 9, self.velocity[2]];
-    game.sound.jump();
-  }
-  if (self.position[1] < -10) self.position = [0, 4, 6];
-  game.print("Crystals: " + game.state.score + " / " + game.state.total);
-}
-
-function onTrigger(self, other, game) {
-  if (other.tag === "coin") {
-    other.destroy();
-    game.state.score++;
-    game.sound.pickup(1 + game.state.score * 0.05);
-  }
-}`,
-    spin: `// Spins and bobs the object it is attached to.
-function start(self, game) {
-  self.state.y = self.position[1];
-  game.state.total = game.findAll("coin").length;
-}
-function update(self, game) {
-  self.rotation += 0.04;
-  const p = self.position;
-  self.position = [p[0], self.state.y + Math.sin(game.time * 2) * 0.2, p[2]];
-}`,
-  },
-  objects: [
-    { name: "player", mesh: "sphere", pos: [0, 2, 6], size: [0.9, 0.9, 0.9], color: [0.95, 0.42, 0.18], body: "dynamic", mass: 2, rough: 0.3, friction: 0, script: "player" },
-    { name: "ground", mesh: "box", pos: [0, -0.5, 0], size: [30, 1, 30], color: [0.42, 0.55, 0.38], checker: true, rough: 0.95, body: "static" },
-    { name: "tower", mesh: "box", pos: [0, 1, 0], size: [4, 2, 4], color: [0.62, 0.63, 0.66], body: "static" },
-    { name: "ramp", mesh: "box", pos: [5, 0.5, -3], size: [3, 1, 6], color: [0.55, 0.45, 0.35], body: "static", yaw: 0.3 },
-    { name: "crate", mesh: "box", pos: [-3, 4, 2], size: [1, 1, 1], color: [0.7, 0.48, 0.28], body: "dynamic", mass: 2 },
-    { name: "crate 2", mesh: "box", pos: [-3.2, 6, 2.3], size: [1, 1, 1], color: [0.7, 0.48, 0.28], body: "dynamic", mass: 2 },
-    { name: "ball", mesh: "sphere", pos: [1.2, 6, 0.6], size: [1, 1, 1], color: [0.85, 0.3, 0.25], body: "dynamic", mass: 1, bounce: 0.6, rough: 0.2 },
-    { name: "lamp", mesh: "sphere", pos: [-5, 2.5, -4], size: [0.5, 0.5, 0.5], color: [1, 0.75, 0.4], emissive: 3, body: "none", light: { color: [3, 2, 1], radius: 8 } },
-    { name: "crystal", mesh: "gem", pos: [0, 3, 0], size: [0.9, 1.3, 0.9], color: [0.4, 0.9, 1], emissive: 2.2, body: "trigger", tag: "coin", script: "spin", light: { color: [0.6, 1.6, 2], radius: 4 } },
-    { name: "crystal 2", mesh: "gem", pos: [8, 1.2, 6], size: [0.9, 1.3, 0.9], color: [0.4, 0.9, 1], emissive: 2.2, body: "trigger", tag: "coin", script: "spin" },
-    { name: "crystal 3", mesh: "gem", pos: [-8, 1.2, -6], size: [0.9, 1.3, 0.9], color: [0.4, 0.9, 1], emissive: 2.2, body: "trigger", tag: "coin", script: "spin" },
-  ],
-};
+// ?project=<name> opens that project; without it, a scratch scene
+const params = new URLSearchParams(location.search);
+const PROJECT = (params.get("project") ?? "").replace(/[^\w .-]/g, "_");
+const STORE = PROJECT ? `ember.project.${PROJECT}.scene` : "ember.editor.scene.v2";
+const DEFAULT = templateScene(params.get("template") ?? "starter", PROJECT || "scratch");
 let scene: Scene = load() ?? structuredClone(DEFAULT);
 let selected = -1;
 let snap = true;
@@ -507,7 +455,35 @@ projBtn.onclick = async () => {
   try { await Project.pickFolder(); } catch (e) { if ((e as Error).name !== "AbortError") alert((e as Error).message); }
 };
 showProject();
-void Project.detectDesktop();
+// ---- projects --------------------------------------------------------------------
+let loadedFromDisk = false;
+Project.onChange(async (p) => {
+  // the first time a project folder connects, its saved scene wins over browser storage
+  if (!p || loadedFromDisk) return;
+  loadedFromDisk = true;
+  const txt = await p.read(scenePath());
+  if (!txt) { persist(); return; }
+  try { const s = JSON.parse(txt) as Scene; if (Array.isArray(s.objects)) { scene = s; selected = -1; refresh(); } } catch { /* keep current */ }
+});
+if (PROJECT) {
+  void Project.openDesktopProject(PROJECT);
+  touchRecent(PROJECT);
+  document.title = `${PROJECT} - ember`;
+} else void Project.detectDesktop();
+const startTab = params.get("tab");
+$("home").onclick = () => { location.href = "launcher.html" + location.hash; };
+$("proj-name").textContent = PROJECT || "scratch scene";
+
+/** Browser-side list of projects for the hub (the desktop app also lists folders). */
+function touchRecent(name: string) {
+  try {
+    const list = JSON.parse(localStorage.getItem("ember.projects") ?? "[]") as { name: string; template: string; opened: number; created: number }[];
+    const e = list.find((x) => x.name === name);
+    if (e) e.opened = Date.now();
+    else list.push({ name, template: params.get("template") ?? "starter", opened: Date.now(), created: Date.now() });
+    localStorage.setItem("ember.projects", JSON.stringify(list));
+  } catch { /* storage unavailable */ }
+}
 
 addEventListener("keydown", (e) => {
   const typing = (e.target as HTMLElement).closest("input,select,textarea");
@@ -598,6 +574,6 @@ eng.run({
   },
 });
 
-setTab("scene");
+setTab(startTab === "sprites" || startTab === "scripts" ? startTab : "scene");
 refresh();
 (window as unknown as { editor: unknown }).editor = { get scene() { return scene; }, select, add, play, pick, setTab, importModel, get playing() { return playing; } };

@@ -40,6 +40,8 @@ export interface SceneObject {
 export interface Scene {
   version: 1;
   name: string;
+  /** Project this scene belongs to (informational). */
+  project?: string;
   sky?: Vec3;
   horizon?: Vec3;
   sunDir?: Vec3;

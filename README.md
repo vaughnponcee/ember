@@ -42,6 +42,20 @@ The desktop app renders exactly as fast as the browser version. What it adds is 
 | `web/index.html` | **Crystal Run**, a 3D collect-a-thon. Add `?stress=1500` to drop 1,500 extra crates |
 | `web/platformer.html` | **Moss Ledge**, a 2D platformer. If you draw a sprite named `hero` in the editor, it replaces the player |
 
+## Hub
+
+The home screen (`web/launcher.html`) is where you start:
+- **Projects:** a searchable list showing when each was last opened.
+- **New project:** a dialog with templates, a preview, a name and the save location:
+  - **3D Starter:** a playable scene with scripts;
+  - **Empty 3D**;
+  - **Physics Playground:** stacks, bouncing balls, and crates you drop with Space;
+  - **2D Sprites:** opens straight into the sprite editor.
+- **Templates:** the same templates as cards.
+- **Learn:** the demos, the script API and editor shortcuts.
+
+In the desktop app each project is a folder, `Documents\ember\<name>\` (`project.json`, `scenes/`, `sprites/`). In a browser, projects live in browser storage.
+
 ## The editor
 
 **Scene tab.**
