@@ -8,7 +8,7 @@ import { damp, lerp } from "../src/math.ts";
 export const TILE = 16;
 export const GRAV = 900, RUN = 110, RUN_MULT = 1.45, JUMP = 330, MAX_FALL = 420;
 /** Gravity multiplier while rising with the jump key released (short hop). */
-export const SHORT_HOP = 2.4;
+export const SHORT_HOP = 1.8;
 
 // Legend: # ground, = one-way plank, ^ spikes, o coin, s slime, C checkpoint, P start, F flag.
 // Design rule: a ledge is at most 3 tiles above where you jump from. A full jump peaks
