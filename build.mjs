@@ -4,7 +4,7 @@ import { stripTypeScriptTypes } from "node:module";
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
-const files = [...readdirSync("src").filter((f) => f.endsWith(".ts")).map((f) => "src/" + f), "web/game.ts"];
+const files = [...readdirSync("src").filter((f) => f.endsWith(".ts")).map((f) => "src/" + f), ...readdirSync("web").filter((f) => f.endsWith(".ts")).map((f) => "web/" + f)];
 let bytes = 0;
 for (const f of files) {
   let js = stripTypeScriptTypes(readFileSync(f, "utf8"), { mode: "strip" });

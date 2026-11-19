@@ -7,7 +7,8 @@ import { writeFileSync, mkdtempSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const [url, out, wait = "6000", expr = "document.title"] = process.argv.slice(2);
+// optional: [preExpr] [preWaitMs] runs preExpr after preWaitMs, then waits waitMs before capturing
+const [url, out, wait = "6000", expr = "document.title", pre = "", preWait = "2000"] = process.argv.slice(2);
 const candidates = [
   process.env.CHROME,
   "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
@@ -36,6 +37,7 @@ const send = (method, params = {}) => new Promise((r) => { pending.set(++id, r);
 
 await send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 720, deviceScaleFactor: 1, mobile: false });
 await send("Page.navigate", { url });
+if (pre) { await sleep(Number(preWait)); await send("Runtime.evaluate", { expression: pre }); }
 await sleep(Number(wait));
 const val = await send("Runtime.evaluate", { expression: expr, returnByValue: true });
 console.log(JSON.stringify(val.result?.result?.value ?? val.result));

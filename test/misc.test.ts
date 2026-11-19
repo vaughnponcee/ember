@@ -63,3 +63,22 @@ test("particles: capacity respected, dead ones removed, survivors keep their dat
   for (let i = 0; i < 400; i++) p.update(1 / 60);
   assert.equal(p.count, 0);
 });
+
+test("animator: loops, holds the last frame of one-shots, switches animations", async () => {
+  const { Animator } = await import("../src/assets.ts");
+  const frames = Array.from({ length: 6 }, (_, i) => ({ tex: null, x: i * 16, y: 0, w: 16, h: 16 }));
+  const sprite = { asset: { kind: "sprite", name: "t", w: 16, h: 16, frames: [], anims: [
+    { name: "run", from: 1, to: 3, fps: 10, loop: true },
+    { name: "die", from: 4, to: 5, fps: 10, loop: false },
+  ] }, tex: null, frames } as never;
+  const a = new Animator(sprite, "run");
+  const seen: number[] = [];
+  for (let i = 0; i < 7; i++) { seen.push(a.index()); a.update(0.1); }
+  assert.deepEqual(seen, [1, 2, 3, 1, 2, 3, 1]);
+  a.play("die");
+  a.update(1);
+  assert.equal(a.index(), 5);
+  assert.ok(a.done);
+  a.play("die"); // same animation: no restart
+  assert.equal(a.index(), 5);
+});
