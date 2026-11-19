@@ -6,7 +6,7 @@ import { extname, join, normalize } from "node:path";
 
 const root = process.cwd();
 const port = Number(process.argv[2] || process.env.PORT || 8080);
-const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png" };
+const types = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".png": "image/png", ".wasm": "application/wasm" };
 createServer(async (req, res) => {
   let rel = new URL(req.url, "http://x").pathname;
   if (rel === "/") { res.writeHead(302, { Location: "/web/" }).end(); return; }
