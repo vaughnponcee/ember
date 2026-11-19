@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { buildMap, entities, stepPlayer, TILE, JUMP, GRAV, type Mover, type Controls } from "../web/moss.ts";
 
 const DT = 1 / 60;
+// prove reachability with a jump 5% weaker than the real one: every ledge has margin
+const WEAK_JUMP = JUMP * 0.95;
 const map = buildMap(), ents = entities();
 const spike = (x: number, y: number) => map.get(Math.floor(x / TILE), Math.floor(y / TILE)) === 5;
 
@@ -40,7 +42,7 @@ function explore() {
             for (let f = 0; f < 200; f++) {
               const jf = f - runUp;
               const c: Controls = { x: dir, run, jumpPressed: jump > 0 && jf === 0, jumpHeld: jump > 0 && jf >= 0 && jf < jump, drop: jump === -1 && f < 6 };
-              stepPlayer(m, c, map, DT);
+              stepPlayer(m, c, map, DT, WEAK_JUMP);
               touch(m);
               if (spike(m.b.x + 2, m.b.y + m.b.h) || spike(m.b.x + m.b.w - 2, m.b.y + m.b.h) || m.b.y > map.h * TILE) { dead = true; break; }
               if (!m.grounded) left = true;
@@ -56,9 +58,10 @@ function explore() {
   return { coinHit, goal, states: seen.size };
 }
 
-test("full jump height is a bit over 3 tiles", () => {
-  const peak = (JUMP * JUMP) / (2 * GRAV);
-  assert.ok(peak > 3 * TILE && peak < 3.5 * TILE, `peak ${peak}px`);
+test("full jump clears a 3-tile ledge with margin", () => {
+  const peak = (JUMP * JUMP) / (2 * GRAV), weak = (WEAK_JUMP * WEAK_JUMP) / (2 * GRAV);
+  assert.ok(peak > 3.6 * TILE && peak < 4 * TILE, `peak ${peak}px`);
+  assert.ok(weak > 3.2 * TILE, `weak jump peak ${weak}px`);
 });
 
 test("every coin and the goal flag can actually be reached", () => {
