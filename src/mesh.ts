@@ -5,7 +5,8 @@
  */
 export interface MeshData {
   vertices: Float32Array; // x y z nx ny nz u v
-  indices: Uint16Array;
+  /** 16-bit when the mesh has at most 65,536 vertices, otherwise 32-bit. */
+  indices: Uint16Array | Uint32Array;
   /** Bounding sphere radius around the origin, used for frustum culling. */
   radius: number;
 }

@@ -29,7 +29,7 @@ test("box stack of 5 stays standing and goes to sleep", () => {
   for (let i = 0; i < 300; i++) w.step(1 / 60);
   boxes.forEach((b, i) => {
     assert.ok(Math.abs(b.pos[1] - (0.5 + i)) < 0.05, `box ${i} y=${b.pos[1]}`);
-    assert.ok(Math.abs(b.pos[0]) < 1e-6 && Math.abs(b.pos[2]) < 1e-6);
+    assert.ok(Math.abs(b.pos[0]) < 0.03 && Math.abs(b.pos[2]) < 0.03, `box ${i} drifted ${b.pos[0]}, ${b.pos[2]}`);
   });
   assert.equal(w.stats.sleeping, 5);
 });
@@ -68,7 +68,7 @@ test("friction stops a sliding box; ice keeps it sliding", () => {
 
 test("fuzz: 300 random bodies never end up inside the floor or each other by much", () => {
   const w = new PhysicsWorld();
-  floor(w);
+  w.add({ pos: [0, -0.5, 0], shape: { kind: "box", half: [400, 0.5, 400] } }); // wide: rolling balls must not leave it
   const r = rng(3);
   const bodies = Array.from({ length: 300 }, () =>
     w.add({
@@ -79,7 +79,14 @@ test("fuzz: 300 random bodies never end up inside the floor or each other by muc
   for (let i = 0; i < 600; i++) w.step(1 / 60);
   let worst = 0;
   for (const b of bodies) {
-    const bottom = b.pos[1] - (b.shape.kind === "sphere" ? b.shape.r : b.shape.half[1]);
+    // lowest point of the body (boxes may be rotated)
+    const bottom = b.shape.kind === "sphere" ? b.pos[1] - b.shape.r : Math.min(...[-1, 1].flatMap((x) => [-1, 1].flatMap((y) => [-1, 1].map((z) => {
+      const h = (b.shape as { half: [number, number, number] }).half, q = b.rot;
+      const v = [x * h[0], y * h[1], z * h[2]];
+      // y component of q * v
+      const tx = 2 * (q[1] * v[2] - q[2] * v[1]), tz = 2 * (q[0] * v[1] - q[1] * v[0]), ty = 2 * (q[2] * v[0] - q[0] * v[2]);
+      return b.pos[1] + v[1] + q[3] * ty + q[2] * tx - q[0] * tz;
+    }))));
     worst = Math.max(worst, -bottom);
     for (const x of b.pos) assert.ok(Number.isFinite(x));
   }
@@ -148,4 +155,71 @@ test("sphere resting on a box edge is pushed out, not stuck inside", () => {
   for (let i = 0; i < 10; i++) w.step(1 / 60);
   const c = collide(s, w.bodies[0]);
   assert.ok(!c || c.depth < 0.005, `still ${c?.depth} deep`);
+});
+
+// ---- rotation ---------------------------------------------------------------
+const tiltQ = (ax: [number, number, number], ang: number): [number, number, number, number] => {
+  const s = Math.sin(ang / 2), l = Math.hypot(...ax);
+  return [ax[0] / l * s, ax[1] / l * s, ax[2] / l * s, Math.cos(ang / 2)];
+};
+/** World-space up vector of a body's local axis i. */
+const axis = (q: number[], i: number) => {
+  const v = [0, 0, 0]; v[i] = 1;
+  const [x, y, z, w] = q;
+  const tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]);
+  return [v[0] + w * tx + y * tz - z * ty, v[1] + w * ty + z * tx - x * tz, v[2] + w * tz + x * ty - y * tx];
+};
+
+test("a box dropped on its corner tumbles and comes to rest flat on a face", () => {
+  const w = new PhysicsWorld();
+  floor(w);
+  const b = w.add({ pos: [0, 3, 0], rot: tiltQ([1, 0.3, 0.7], 0.9), shape: { kind: "box", half: [0.5, 0.5, 0.5] }, mass: 1, restitution: 0.2 });
+  let maxSpin = 0;
+  for (let i = 0; i < 400; i++) { w.step(1 / 60); maxSpin = Math.max(maxSpin, Math.hypot(...b.angVel)); }
+  assert.ok(maxSpin > 1, `it should actually tumble (max spin ${maxSpin})`);
+  // resting on a face: some local axis points straight up, and the centre sits half a side above the floor
+  const up = Math.max(...[0, 1, 2].map((i) => Math.abs(axis(b.rot, i)[1])));
+  assert.ok(up > 0.995, `not flat: best axis alignment ${up}`);
+  assert.ok(Math.abs(b.pos[1] - 0.5) < 0.03, `y=${b.pos[1]}`);
+  assert.ok(b.sleeping);
+});
+
+test("a ball rolls down a tilted ramp and spins about the right axis", () => {
+  const w = new PhysicsWorld();
+  floor(w);
+  // ramp tilted about z so it descends toward +x
+  w.add({ pos: [0, 2, 0], rot: tiltQ([0, 0, 1], -0.35), shape: { kind: "box", half: [5, 0.2, 2] }, friction: 0.9 });
+  const ball = w.add({ pos: [-3.5, 4.2, 0], shape: { kind: "sphere", r: 0.4 }, mass: 1, friction: 0.9 });
+  for (let i = 0; i < 70; i++) w.step(1 / 60);
+  assert.ok(ball.vel[0] > 2, `moving downhill: vx=${ball.vel[0]}`);
+  // rolling toward +x spins about -z
+  assert.ok(ball.angVel[2] < -3, `spin z=${ball.angVel[2]}`);
+});
+
+test("fixedRotation bodies never spin", () => {
+  const w = new PhysicsWorld();
+  floor(w);
+  const c = w.add({ pos: [0, 1, 0], vel: [6, 0, 0], shape: { kind: "box", half: [0.4, 0.9, 0.4] }, mass: 1, friction: 1, fixedRotation: true });
+  w.add({ pos: [2, 0.5, 0], shape: { kind: "box", half: [0.5, 0.5, 0.5] } });
+  for (let i = 0; i < 120; i++) w.step(1 / 60);
+  assert.deepEqual(c.rot, [0, 0, 0, 1]);
+});
+
+test("a box pushed past a ledge tips over the edge", () => {
+  const w = new PhysicsWorld();
+  w.add({ pos: [0, 4.5, 0], shape: { kind: "box", half: [2, 0.5, 2] } }); // table top at y=5
+  floor(w);
+  const b = w.add({ pos: [1.75, 5.5, 0], shape: { kind: "box", half: [0.5, 0.5, 0.5] }, mass: 1, friction: 0.8 });
+  for (let i = 0; i < 200; i++) w.step(1 / 60);
+  assert.ok(b.pos[1] < 1, `fell off: y=${b.pos[1]}`);
+  const tipped = Math.abs(axis(b.rot, 1)[1]) < 0.995 || b.pos[0] > 2.5;
+  assert.ok(tipped);
+});
+
+test("raycast hits a rotated box on its real surface", () => {
+  const w = new PhysicsWorld();
+  w.add({ pos: [0, 0, -5], rot: tiltQ([0, 1, 0], Math.PI / 4), shape: { kind: "box", half: [1, 1, 1] } });
+  const h = w.raycast([0, 0, 0], [0, 0, -1])!;
+  // the corner of a 45 degree box points at the ray: distance 5 - sqrt(2)
+  assert.ok(Math.abs(h.t - (5 - Math.SQRT2)) < 1e-6, `t=${h.t}`);
 });

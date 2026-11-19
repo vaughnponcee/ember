@@ -7,6 +7,7 @@
  * load in games without an image pipeline.
  */
 import type { Frame, SpriteBatch, Texture } from "./sprites.ts";
+import { Project } from "./project.ts";
 
 export interface SpriteAnim { name: string; from: number; to: number; fps: number; loop: boolean }
 
@@ -21,6 +22,16 @@ export interface SpriteAsset {
 }
 
 export const LIBRARY_KEY = "ember.assets";
+
+const spritePath = (name: string) => `sprites/${name.replace(/[^\w .-]/g, "_")}.json`;
+// painting saves on every stroke: coalesce disk writes per sprite
+const pending = new Map<string, ReturnType<typeof setTimeout>>();
+function queueWrite(a: SpriteAsset) {
+  const p = Project.store;
+  if (!p) return;
+  clearTimeout(pending.get(a.name));
+  pending.set(a.name, setTimeout(() => { pending.delete(a.name); void p.write(spritePath(a.name), JSON.stringify(a)); }, 400));
+}
 
 export function encodePixels(px: Uint8ClampedArray): string {
   let s = "";
@@ -104,8 +115,30 @@ export const Library = {
     const list = this.all().filter((x) => x.name !== a.name);
     list.push(a);
     try { localStorage.setItem(LIBRARY_KEY, JSON.stringify(list)); } catch { /* storage full or blocked */ }
+    queueWrite(a);
   },
   remove(name: string): void {
     try { localStorage.setItem(LIBRARY_KEY, JSON.stringify(this.all().filter((x) => x.name !== name))); } catch { /* ignore */ }
+    void Project.store?.remove(spritePath(name));
+  },
+  /**
+   * After connecting a project: sprites on disk win over browser copies, and
+   * sprites that only exist in the browser are written to disk.
+   */
+  async syncFromProject(): Promise<number> {
+    const p = Project.store;
+    if (!p) return 0;
+    const byName = new Map(this.all().map((a) => [a.name, a]));
+    const onDisk = new Set<string>();
+    for (const f of await p.list("sprites")) {
+      if (!f.endsWith(".json")) continue;
+      try {
+        const a = JSON.parse((await p.read("sprites/" + f)) ?? "") as SpriteAsset;
+        if (a.kind === "sprite" && a.frames?.length) { byName.set(a.name, a); onDisk.add(a.name); }
+      } catch { /* skip broken files */ }
+    }
+    try { localStorage.setItem(LIBRARY_KEY, JSON.stringify([...byName.values()])); } catch { /* ignore */ }
+    for (const a of byName.values()) if (!onDisk.has(a.name)) await p.write(spritePath(a.name), JSON.stringify(a));
+    return byName.size;
   },
 };

@@ -3,18 +3,38 @@
 A small game engine for the browser, written in TypeScript on WebGL2 with no dependencies. It has:
 - **3D:** shadowed, instanced rendering;
 - **2D:** sprites and tilemaps;
-- **physics** and an **ECS**;
+- **physics** with tumbling rigid bodies, and an **ECS**;
+- **glTF/GLB model import**;
 - **an in-browser editor:** scene building, pixel art with frame animation, and scripts attached to objects.
 
 ![Crystal Run](docs/screenshot.png)
 
 ```bash
 npm start            # builds, then serves http://127.0.0.1:8080/web/
-npm test             # 46 tests
+npm test             # 56 tests
 npm run bench        # physics and ECS benchmarks
+npm run exe          # builds dist/ember.exe, the desktop app
 ```
 
 Needs Node 23.6 or newer, which runs TypeScript directly. Nothing to install.
+
+## Desktop app
+
+`dist/ember.exe` is a single file, built with Node's single-executable feature. Every editor and game file is embedded inside it.
+
+When you run it:
+1. It serves those files on a private local port.
+2. It opens them in a chromeless Edge or Chrome app window that uses your GPU and runs at your display's refresh rate.
+3. Closing the window quits the app.
+
+Projects are real files:
+- **Location:** `Documents\ember\scenes\*.json` and `Documents\ember\sprites\*.json`. Set `EMBER_PROJECT` to use another folder.
+- **Saving:** the scene autosaves as you edit, and sprites save as you paint.
+- **Security:** the file API only answers the app window, which gets a random token in its URL. It refuses any path outside the project folder.
+
+In a normal Chrome or Edge tab, the drive button in the editor connects any folder as the project, using the browser's file-system access. In other browsers, work stays in browser storage; use Export to keep it.
+
+The desktop app renders exactly as fast as the browser version. What it adds is a dedicated window, background-throttling turned off, real files, and no browser tabs or extensions running alongside.
 
 | page | what it is |
 |---|---|
@@ -25,19 +45,19 @@ Needs Node 23.6 or newer, which runs TypeScript directly. Nothing to install.
 ## The editor
 
 **Scene tab.**
-- Add boxes, crates, balls, pillars, crystals and lights.
+- Add boxes, crates, balls, pillars, crystals and lights, or **import a .glb/.gltf model**.
 - Click to select, drag to move (snaps to 0.5), Alt-drag for height.
 - Right-drag orbits, Shift+right-drag pans, the wheel zooms.
-- The inspector edits mesh, transform, colour, glow, roughness, physics type, mass, bounce, tag, script and point light.
+- The inspector edits mesh, transform, colour, glow, roughness, physics type, mass, bounce, "keep upright", tag, script and point light.
 - Undo and redo, duplicate, delete.
 - Scenes autosave to the browser and save or open as JSON.
 - **Play** (Ctrl+P) runs the scene with physics and scripts. **Stop** restores the layout from before Play.
 
 **Sprites tab.** A pixel-art editor and animator.
 - Pencil, eraser, flood fill and colour picker; a palette; mirror drawing.
-- A frame strip with onion skin. Frames can be added, duplicated, reordered, flipped and deleted.
+- A frame strip with onion skin and a **play button** with adjustable fps. Frames can be added, duplicated, reordered, flipped and deleted.
 - Named animations over frame ranges, each with its own fps and loop setting, with a live preview.
-- Every sprite lives in an asset library. It exports as a PNG sprite sheet or JSON and imports back.
+- Every sprite lives in an asset library, saved to the project folder when one is open. It exports as a PNG sprite sheet or JSON and imports back.
 
 **Scripts tab.** Behaviour attached to objects, the way Unity attaches C# components.
 - Scripts are JavaScript, edited in the page with a live syntax check.
@@ -65,7 +85,7 @@ function onTrigger(self, other, game) {
 **Script API**
 - **Hooks:** `start`, `update`, `onTrigger`, `onCollide`, `onDestroy`.
 - **`self` and `other`:**
-  - read/write `position`, `velocity`, `rotation`, `scale`, `color`;
+  - read/write `position`, `velocity`, `rotation`, `spin`, `scale`, `color`;
   - read `grounded`, `name`, `tag`;
   - per-object `state`;
   - `push()`, `destroy()`, `distanceTo()`.
@@ -98,7 +118,9 @@ F3 shows a live performance overlay in any game built on `Engine`.
 | `src/renderer.ts` | Instanced WebGL2 forward renderer. All instances go into one buffer upload per frame, with one draw per mesh per pass. Sun with a 2048² PCF shadow map, hemisphere ambient, 8 point lights, height fog, ACES tonemapping, sky, frustum culling. |
 | `src/sprites.ts` | Instanced 2D sprite batch: rotation, pivot, tint, flip. Generated font atlas for text, 2D camera with shake. |
 | `src/tilemap.ts` | Tile grid with solid and one-way tiles, drop-through, and platformer collision that never tunnels. Only the tiles in view are drawn. |
-| `src/physics.ts` | Spheres and boxes. Hashed grid broadphase, impulse contacts with friction, shock propagation for stacks, sleeping, triggers, layers, raycasts. |
+| `src/physics.ts` | Spheres and oriented boxes that rotate and tumble. Hashed grid broadphase, separating-axis box tests with up to 4 contact points, sequential impulses with angular terms, warm starting, two-axis friction, shock propagation, sleeping, triggers, layers, raycasts. |
+| `src/gltf.ts` | glTF 2.0 import (.glb, or .gltf with embedded data). Node transforms are baked in, mirrored nodes keep correct winding, missing normals are computed, and the model is fitted to a unit box. |
+| `src/project.ts` | Project storage: the desktop file API, or a browser folder via File System Access. |
 | `src/script.ts` | Script runtime: compile, lifecycle, contact dispatch, error isolation. |
 | `src/scene.ts` | JSON scene format plus the standard spawn, interpolate and draw systems. |
 | `src/assets.ts` | Sprite assets, the library, sprite sheets and the `Animator`. |
@@ -106,13 +128,15 @@ F3 shows a live performance overlay in any game built on `Engine`.
 
 ## Numbers
 
-Physics step, `npm run bench`, Node 24, one thread:
+Physics step, `npm run bench`, Node 24, one thread. Half spheres and half boxes, dropped as a dense four-layer pile, all rotating:
 
-| bodies | falling | settled |
+| bodies | falling | piled up |
 |---:|---:|---:|
-| 500 | 0.97 ms | 0.46 ms |
-| 1000 | 2.03 ms | 1.22 ms |
-| 2000 | 4.08 ms | 2.84 ms |
+| 100 | 1.8 ms | 0.9 ms |
+| 500 | 5.3 ms | 4.8 ms |
+| 1000 | 14.6 ms | 19.7 ms |
+
+Rotation costs a lot. Before boxes could tumble, 1,000 bodies took 2 ms. Box-box contact now runs a 15-axis separating-axis test and solves up to 4 points with angular terms. A few hundred tumbling bodies fit comfortably in a 60 fps frame; a dense 1,000-body pile doesn't yet.
 
 Crystal Run, CPU time per frame (physics, systems and draw submission) in headless Edge:
 
@@ -126,6 +150,13 @@ The frame budget at 60 fps is 16.7 ms. The headless browser renders on a softwar
 
 ## Things that broke on the way
 
+- **The first rotating solver knocked over its own stacks.** Three causes:
+  - friction clamped along a tangent that changed between iterations;
+  - contact points solved in a fixed order, so the same corner always went first;
+  - the final stabilising pass pushed one corner at a time.
+
+  Fixes: two fixed friction axes per contact, alternating solve order, a linear-only stabilising pass, and above all **warm starting** (each contact keeps last step's impulses). Stacks of 8 boxes now stand and sleep.
+- **Rotating piles never fell asleep.** A body resting on a sleeping one woke it every step. Now only real impacts wake sleepers. Sleepers act as solid ground, and sleep is judged on smoothed motion.
 - **Stacks sank and never slept.** Fixed with bottom-up contact ordering plus a shock-propagation pass.
 - **Physics was slower than it needed to be.** The broadphase built string keys and a pair Set every step, and paired the floor with every body. Switching to integer cell hashes, an AABB pre-test, and reporting each pair only from the lowest cell both bodies share made it 2.4 to 2.9 times faster at 1,000 to 2,000 bodies.
 - **The renderer allocated per instance per frame.** It built JavaScript arrays and new typed arrays every frame. Now each batch writes into reusable typed arrays, and the whole frame uploads once.
@@ -134,9 +165,9 @@ The frame budget at 60 fps is 16.7 ms. The headless browser renders on a softwar
 
 ## Limits
 
-- **3D bodies don't rotate,** so there is no tumbling.
+- **Collision shapes are spheres and boxes.** Imported models collide as their bounding box.
+- **glTF textures, skinning, animation and compressed meshes are not imported yet.** Models use their material colour.
 - **One shadow cascade.**
 - **Point lights don't cast shadows.**
-- **No model import yet,** only procedural meshes. glTF is next.
 - **Scripts run as page code.** They are your own game code, so only open scene files you trust.
-- **The asset library lives in this browser's storage.** Export sprites and scenes to keep them.
+- **The exe is unsigned,** so Windows SmartScreen may warn the first time you run it.

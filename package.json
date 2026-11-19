@@ -8,6 +8,7 @@
     "test": "node --test \"test/*.test.ts\"",
     "build": "node build.mjs",
     "start": "node build.mjs && node tools/serve.mjs",
-    "bench": "node bench/bench.ts"
+    "bench": "node bench/bench.ts",
+    "exe": "node tools/build-exe.mjs"
   }
 }
